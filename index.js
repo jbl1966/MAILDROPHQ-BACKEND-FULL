@@ -68,28 +68,34 @@ async function generateFallbackMailTMEmail() {
 
 // Generate email route
 app.post('/api/generate', async (req, res) => {
+  const { custom } = req.body;
+
   try {
-    if (primaryAPI === '1secmail') {
-      const response = await axios.get(
-        'https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1'
-      );
-      const email = response.data[0];
-      return res.json({ email, engine: '1secmail' });
-    } else {
-      const fallback = await generateFallbackMailTMEmail();
-      if (!fallback) throw new Error('Mail.tm failed');
-      return res.json({ email: fallback.email, token: fallback.token, engine: 'mail.tm' });
-    }
+    const email = custom
+      ? `${custom}@mechanicspedia.com` // Custom address
+      : `${generateRandomString(8)}@mechanicspedia.com`; // Random address
+
+    const accountRes = await axios.post('https://api.mail.tm/accounts', {
+      address: email,
+      password: 'maildrophq123'
+    });
+
+    const tokenRes = await axios.post('https://api.mail.tm/token', {
+      address: email,
+      password: 'maildrophq123'
+    });
+
+    return res.json({
+      id: accountRes.data.id,
+      address: email,
+      token: tokenRes.data.token,
+      engine: 'mail.tm'
+    });
   } catch (err) {
-    if (primaryAPI === '1secmail') {
-      primaryAPI = 'mail.tm';
-      lastPrimaryFailure = Date.now();
-      const fallback = await generateFallbackMailTMEmail();
-      if (!fallback) return res.status(500).json({ error: 'All services failed' });
-      return res.json({ email: fallback.email, token: fallback.token, engine: 'mail.tm' });
-    } else {
-      return res.status(500).json({ error: 'All services failed' });
+    if (err.response && err.response.status === 422) {
+      return res.status(400).json({ error: 'Email already taken. Try another name.' });
     }
+    return res.status(500).json({ error: 'Failed to create email address.' });
   }
 });
 
