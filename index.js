@@ -69,20 +69,25 @@ async function generateFallbackMailTMEmail() {
 // Generate email route
 app.post('/api/generate', async (req, res) => {
   const { custom } = req.body;
-  try {
-    // ... attempt to register with Mail.tm
-  } catch (err) {
-    console.error('Generate error:', err.response?.data || err.message);
-    res.status(500).json({
-      error: err.response?.data?.detail || 'Internal server error. Please try again.',
-    });
-  }
-});
 
+  try {
+    const domainRes = await axios.get('https://api.mail.tm/domains');
+    const domain = domainRes.data['hydra:member'][0].domain;
+
+    const email = custom
+      ? `${custom}@${domain}`
+      : `${Math.random().toString(36).substring(2, 10)}@${domain}`;
+
+    const password = 'maildrophq123';
+
+    const accountRes = await axios.post('https://api.mail.tm/accounts', {
+      address: email,
+      password
+    });
 
     const tokenRes = await axios.post('https://api.mail.tm/token', {
       address: email,
-      password: 'maildrophq123'
+      password
     });
 
     return res.json({
@@ -95,9 +100,11 @@ app.post('/api/generate', async (req, res) => {
     if (err.response && err.response.status === 422) {
       return res.status(400).json({ error: 'Email already taken. Try another name.' });
     }
+    console.error('Generate error:', err.message);
     return res.status(500).json({ error: 'Failed to create email address.' });
   }
 });
+
 
 // Inbox polling route
 app.get('/api/inbox', async (req, res) => {
