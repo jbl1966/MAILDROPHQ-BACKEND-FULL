@@ -69,16 +69,16 @@ async function generateFallbackMailTMEmail() {
 // Generate email route
 app.post('/api/generate', async (req, res) => {
   const { custom } = req.body;
-
   try {
-    const email = custom
-      ? `${custom}@mechanicspedia.com` // Custom address
-      : `${generateRandomString(8)}@mechanicspedia.com`; // Random address
-
-    const accountRes = await axios.post('https://api.mail.tm/accounts', {
-      address: email,
-      password: 'maildrophq123'
+    // ... attempt to register with Mail.tm
+  } catch (err) {
+    console.error('Generate error:', err.response?.data || err.message);
+    res.status(500).json({
+      error: err.response?.data?.detail || 'Internal server error. Please try again.',
     });
+  }
+});
+
 
     const tokenRes = await axios.post('https://api.mail.tm/token', {
       address: email,
