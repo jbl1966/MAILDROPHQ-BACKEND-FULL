@@ -67,7 +67,7 @@ async function generateFallbackMailTMEmail() {
 // ========== ROUTES ==========
 
 // Generate email route
-app.get('/api/generate', async (req, res) => {
+app.post('/api/generate', async (req, res) => {
   try {
     if (primaryAPI === '1secmail') {
       const response = await axios.get(
