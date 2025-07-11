@@ -1,4 +1,4 @@
-const BACKEND_URL = 'https://maildrophq-backend-full.onrender.com';
+  const BACKEND_URL = 'https://maildrophq-backend-full.onrender.com';
 
 const generateBtn = document.getElementById('generateBtn');
 const newEmailBtn = document.getElementById('newEmailBtn');
