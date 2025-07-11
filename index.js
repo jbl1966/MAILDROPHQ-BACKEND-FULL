@@ -1,165 +1,172 @@
-  const BACKEND_URL = 'https://maildrophq-backend-full.onrender.com';
+require('dotenv').config();
 
-const generateBtn = document.getElementById('generateBtn');
-const newEmailBtn = document.getElementById('newEmailBtn');
-const customEmailInput = document.getElementById('customEmailInput');
-const generatedEmail = document.getElementById('generatedEmail');
-const emailDisplay = document.getElementById('emailDisplay');
-const copyBtn = document.getElementById('copyBtn');
-const copyTooltip = document.getElementById('copyTooltip');
-const inboxList = document.getElementById('inboxList');
-const inboxSection = document.getElementById('inboxSection');
-const inboxLoading = document.getElementById('inboxLoading');
-const messageContent = document.getElementById('messageContent');
-const messageSubject = document.getElementById('messageSubject');
-const messageFrom = document.getElementById('messageFrom');
-const messageDate = document.getElementById('messageDate');
-const messageBody = document.getElementById('messageBody');
-const closeMessage = document.getElementById('closeMessage');
-const countdown = document.getElementById('countdown');
-const timerSection = document.getElementById('timerSection');
-const darkModeToggle = document.getElementById('darkModeToggle');
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const path = require('path');
 
-let inboxId = '';
-let userToken = '';
-let timerInterval;
-let inboxInterval;
-let timeLeft = 600;
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Hide tooltip and email display on initial load
-copyTooltip.classList.add('hidden');
-emailDisplay.classList.add('hidden');
-inboxSection.classList.add('hidden');
-timerSection.classList.add('hidden');
-newEmailBtn.style.display = 'none';
+app.use(cors());
+app.use(express.json());
 
-generateBtn.addEventListener('click', async () => {
-  const customName = customEmailInput.value.trim();
+let primaryAPI = '1secmail';
+let lastPrimaryFailure = null;
+
+const ONE_SEC_MAIL_DOMAIN = '1secmail.com';
+const MAIL_TM_DOMAIN = 'mail.tm';
+
+function get1SecMailInbox(email) {
+  const [login, domain] = email.split('@');
+  return `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`;
+}
+
+function get1SecMailMessage(email, id) {
+  const [login, domain] = email.split('@');
+  return `https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${id}`;
+}
+
+async function check1SecMailAvailability() {
   try {
-    generateBtn.disabled = true;
-    const res = await fetch(`${BACKEND_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ custom: customName })
+    const res = await axios.get(
+      'https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1',
+      { timeout: 3000 }
+    );
+    return Array.isArray(res.data) && res.data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function generateFallbackMailTMEmail() {
+  try {
+    const domainRes = await axios.get('https://api.mail.tm/domains');
+    const domain = domainRes.data['hydra:member'][0].domain;
+    const username = Math.random().toString(36).substring(2, 10);
+    const password = 'TempPass123!';
+    const email = `${username}@${domain}`;
+
+    await axios.post('https://api.mail.tm/accounts', {
+      address: email,
+      password
     });
-    const data = await res.json();
-    if (res.ok && data.token) {
-      inboxId = data.id;
-      userToken = data.token;
-      generatedEmail.textContent = data.address;
 
-      emailDisplay.classList.remove('hidden');
-      inboxSection.classList.remove('hidden');
-      timerSection.classList.remove('hidden');
-      copyBtn.style.display = 'inline-block';
-      newEmailBtn.style.display = 'inline-block';
-      customEmailInput.disabled = true;
+    const tokenRes = await axios.post('https://api.mail.tm/token', {
+      address: email,
+      password
+    });
 
-      pollInbox();
-      inboxInterval = setInterval(pollInbox, 8000);
-      startTimer();
-    } else {
-      alert(data.error || 'Failed to create email. Try another name.');
-      generateBtn.disabled = false;
-    }
+    const token = tokenRes.data.token;
+    return { email, token };
+  } catch {
+    return null;
+  }
+}
+
+// ========== ROUTES ==========
+
+// Generate email route
+app.post('/api/generate', async (req, res) => {
+  const { custom } = req.body;
+
+  try {
+    const domainRes = await axios.get('https://api.mail.tm/domains');
+    const domain = domainRes.data['hydra:member'][0].domain;
+
+    const email = custom
+      ? `${custom}@${domain}`
+      : `${Math.random().toString(36).substring(2, 10)}@${domain}`;
+
+    const password = 'maildrophq123';
+
+    const accountRes = await axios.post('https://api.mail.tm/accounts', {
+      address: email,
+      password
+    });
+
+    const tokenRes = await axios.post('https://api.mail.tm/token', {
+      address: email,
+      password
+    });
+
+    return res.json({
+      id: accountRes.data.id,
+      address: email,
+      token: tokenRes.data.token,
+      engine: 'mail.tm'
+    });
   } catch (err) {
-    alert('Error creating email. Please try again.');
-    generateBtn.disabled = false;
+    if (err.response && err.response.status === 422) {
+      return res.status(400).json({ error: 'Email already taken. Try another name.' });
+    }
+    console.error('Generate error:', err.message);
+    return res.status(500).json({ error: 'Failed to create email address.' });
   }
 });
 
-newEmailBtn.addEventListener('click', () => location.reload());
 
-copyBtn.addEventListener('click', () => {
-  navigator.clipboard.writeText(generatedEmail.textContent).then(() => {
-    copyTooltip.classList.remove('hidden');
-    setTimeout(() => copyTooltip.classList.add('hidden'), 2000);
-  });
-});
+// Inbox polling route
+app.get('/api/inbox', async (req, res) => {
+  const { email, token, engine } = req.query;
 
-closeMessage.addEventListener('click', () => {
-  messageContent.classList.add('hidden');
-  inboxList.classList.remove('hidden');
-});
-
-function startTimer() {
-  timeLeft = 600;
-  clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    timeLeft--;
-    const minutes = Math.floor(timeLeft / 60);
-    const seconds = timeLeft % 60;
-    countdown.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    if (timeLeft <= 0) {
-      clearInterval(timerInterval);
-      clearInterval(inboxInterval);
-      customEmailInput.disabled = true;
-      generateBtn.disabled = true;
-      newEmailBtn.disabled = false;
-      countdown.textContent = 'Expired';
-    }
-  }, 1000);
-}
-
-async function pollInbox() {
-  if (!inboxId || !userToken) return;
-  inboxLoading.classList.remove('hidden');
   try {
-    const res = await fetch(`${BACKEND_URL}/api/messages/${inboxId}`, {
-      headers: {
-        'Authorization': `Bearer ${userToken}`
-      }
-    });
-    const messages = await res.json();
-    inboxList.innerHTML = '';
-
-    if (Array.isArray(messages) && messages.length > 0) {
-      messages.forEach(msg => {
-        const li = document.createElement('li');
-        li.innerHTML = `
-          <strong>${msg.from.address}</strong> — ${msg.subject}
-          <span>${new Date(msg.createdAt).toLocaleTimeString()}</span>
-        `;
-        li.addEventListener('click', () => loadMessage(msg.id));
-        inboxList.appendChild(li);
+    if (engine === '1secmail') {
+      const inboxURL = get1SecMailInbox(email);
+      const response = await axios.get(inboxURL);
+      return res.json(response.data);
+    } else if (engine === 'mail.tm') {
+      const response = await axios.get('https://api.mail.tm/messages', {
+        headers: { Authorization: `Bearer ${token}` }
       });
+      return res.json(response.data['hydra:member']);
     } else {
-      inboxList.innerHTML = '<li>No messages yet</li>';
+      return res.status(400).json({ error: 'Invalid engine' });
     }
   } catch (err) {
-    inboxList.innerHTML = '<li>Error loading inbox</li>';
+    return res.status(500).json({ error: 'Inbox fetch failed' });
   }
-  inboxLoading.classList.add('hidden');
-}
-
-async function loadMessage(messageId) {
-  if (!userToken) return;
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/message/${inboxId}/${messageId}`, {
-      headers: {
-        'Authorization': `Bearer ${userToken}`
-      }
-    });
-    const msg = await res.json();
-    messageSubject.textContent = msg.subject || '(No Subject)';
-    messageFrom.textContent = msg.from.address;
-    messageDate.textContent = new Date(msg.createdAt).toLocaleString();
-    messageBody.innerHTML = msg.html || `<pre>${msg.text}</pre>`;
-    messageContent.classList.remove('hidden');
-    inboxList.classList.add('hidden');
-  } catch (err) {
-    alert('Failed to load message.');
-  }
-}
-
-// Dark Mode
-darkModeToggle.addEventListener('click', () => {
-  document.body.classList.toggle('dark');
-  localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
 });
 
-window.addEventListener('DOMContentLoaded', () => {
-  if (localStorage.getItem('theme') === 'dark') {
-    document.body.classList.add('dark');
+// Read message route
+app.get('/api/message', async (req, res) => {
+  const { email, id, token, engine } = req.query;
+
+  try {
+    if (engine === '1secmail') {
+      const msgURL = get1SecMailMessage(email, id);
+      const response = await axios.get(msgURL);
+      return res.json(response.data);
+    } else if (engine === 'mail.tm') {
+      const response = await axios.get(`https://api.mail.tm/messages/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return res.json(response.data);
+    } else {
+      return res.status(400).json({ error: 'Invalid engine' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: 'Message fetch failed' });
   }
+});
+
+// Root message
+app.get('/', (req, res) => {
+  res.send('MailDropHQ Backend is running.');
+});
+
+// Health check and auto-recovery
+setInterval(async () => {
+  if (primaryAPI === 'mail.tm' && Date.now() - lastPrimaryFailure > 60000) {
+    const available = await check1SecMailAvailability();
+    if (available) {
+      console.log('[Recovery] Switching back to 1SecMail');
+      primaryAPI = '1secmail';
+    }
+  }
+}, 30000);
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`MailDropHQ backend running on port ${PORT}`);
 });
