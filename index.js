@@ -14,14 +14,14 @@ app.post('/api/generate', async (req, res) => {
   const { custom } = req.body;
 
   try {
-    // Get available domain
+    // Get domain from Mail.tm
     const domainRes = await axios.get('https://api.mail.tm/domains');
     const domain = domainRes.data['hydra:member'][0].domain;
 
-    // Create email and password
-    const address = custom
-      ? `${custom}@${domain}`
-      : `${Math.random().toString(36).substring(2, 10)}@${domain}`;
+    // Force uniqueness even for custom
+    const base = custom || Math.random().toString(36).substring(2, 10);
+    const timestamp = Date.now().toString(36);
+    const address = `${base}-${timestamp}@${domain}`;
     const password = 'maildrophq123';
 
     // Create account
@@ -42,10 +42,10 @@ app.post('/api/generate', async (req, res) => {
       token: tokenRes.data.token
     });
   } catch (err) {
+    console.error('[generate] error:', err.response?.data || err.message);
     if (err.response?.status === 422) {
       return res.status(400).json({ error: 'Email already taken. Try another name.' });
     }
-    console.error('[generate] error:', err.message);
     return res.status(500).json({ error: 'Failed to create email address.' });
   }
 });
@@ -63,7 +63,7 @@ app.get('/api/messages/:id', async (req, res) => {
     });
     return res.json(response.data['hydra:member']);
   } catch (err) {
-    console.error('[messages] error:', err.message);
+    console.error('[messages] error:', err.response?.data || err.message);
     return res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
@@ -81,12 +81,12 @@ app.get('/api/message/:inboxId/:messageId', async (req, res) => {
     });
     return res.json(response.data);
   } catch (err) {
-    console.error('[message] error:', err.message);
+    console.error('[message] error:', err.response?.data || err.message);
     return res.status(500).json({ error: 'Failed to fetch message' });
   }
 });
 
-// ===== Root check =====
+// ===== Root Check =====
 app.get('/', (req, res) => {
   res.send('MailDropHQ Backend is running.');
 });
