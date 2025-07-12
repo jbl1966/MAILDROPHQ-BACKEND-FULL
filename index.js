@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ===== /api/generate =====
+// Robust /api/generate route with fallback logic
 app.post('/api/generate', async (req, res) => {
   const { custom } = req.body;
 
@@ -20,63 +20,52 @@ app.post('/api/generate', async (req, res) => {
     const base = custom || Math.random().toString(36).substring(2, 10);
     const password = 'maildrophq123';
     let address = `${base}@${domain}`;
-    let modified = false;
 
     try {
-      // Try to create custom email
-      const accountRes = await axios.post('https://api.mail.tm/accounts', {
-        address,
-        password
-      });
-
-      const tokenRes = await axios.post('https://api.mail.tm/token', {
-        address,
-        password
-      });
+      const accountRes = await axios.post('https://api.mail.tm/accounts', { address, password });
+      const tokenRes = await axios.post('https://api.mail.tm/token', { address, password });
 
       return res.json({
         id: accountRes.data.id,
         address,
         token: tokenRes.data.token
       });
-    } catch (err) {
-      if (err.response?.status !== 422) throw err;
-
-      // Email already taken – append random suffix
+    } catch (initialErr) {
       const suffix = Math.random().toString(36).substring(2, 8);
-      const modifiedAddress = `${base}-${suffix}@${domain}`;
-      modified = true;
+      const fallbackAddress = `${base}-${suffix}@${domain}`;
 
-      // Retry with modified address
-      const accountRes = await axios.post('https://api.mail.tm/accounts', {
-        address: modifiedAddress,
-        password
-      });
+      try {
+        const accountRes = await axios.post('https://api.mail.tm/accounts', {
+          address: fallbackAddress,
+          password
+        });
 
-      const tokenRes = await axios.post('https://api.mail.tm/token', {
-        address: modifiedAddress,
-        password
-      });
+        const tokenRes = await axios.post('https://api.mail.tm/token', {
+          address: fallbackAddress,
+          password
+        });
 
-      return res.json({
-        id: accountRes.data.id,
-        address: modifiedAddress,
-        token: tokenRes.data.token,
-        modified: true,
-        original: address
-      });
+        return res.json({
+          id: accountRes.data.id,
+          address: fallbackAddress,
+          token: tokenRes.data.token,
+          modified: true,
+          original: address
+        });
+      } catch (fallbackErr) {
+        console.error('[generate:fallback] failed:', fallbackErr.response?.data || fallbackErr.message);
+        return res.status(500).json({ error: 'Unable to create a unique email address.' });
+      }
     }
   } catch (err) {
-    console.error('[generate] error:', err.response?.data || err.message);
+    console.error('[generate] general error:', err.response?.data || err.message);
     return res.status(500).json({ error: 'Failed to create email address.' });
   }
 });
 
-// ===== /api/messages/:id =====
+// /api/messages/:id
 app.get('/api/messages/:id', async (req, res) => {
-  const { id } = req.params;
   const auth = req.headers.authorization;
-
   if (!auth) return res.status(401).json({ error: 'Missing token' });
 
   try {
@@ -90,11 +79,10 @@ app.get('/api/messages/:id', async (req, res) => {
   }
 });
 
-// ===== /api/message/:inboxId/:messageId =====
+// /api/message/:inboxId/:messageId
 app.get('/api/message/:inboxId/:messageId', async (req, res) => {
   const { messageId } = req.params;
   const auth = req.headers.authorization;
-
   if (!auth) return res.status(401).json({ error: 'Missing token' });
 
   try {
@@ -108,7 +96,7 @@ app.get('/api/message/:inboxId/:messageId', async (req, res) => {
   }
 });
 
-// ===== Root Check =====
+// Root status
 app.get('/', (req, res) => {
   res.send('MailDropHQ Backend is running.');
 });
