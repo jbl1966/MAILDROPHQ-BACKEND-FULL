@@ -14,38 +14,60 @@ app.post('/api/generate', async (req, res) => {
   const { custom } = req.body;
 
   try {
-    // Get domain from Mail.tm
     const domainRes = await axios.get('https://api.mail.tm/domains');
     const domain = domainRes.data['hydra:member'][0].domain;
 
-    // Force uniqueness even for custom
     const base = custom || Math.random().toString(36).substring(2, 10);
-    const timestamp = Date.now().toString(36);
-    const address = `${base}-${timestamp}@${domain}`;
     const password = 'maildrophq123';
+    let address = `${base}@${domain}`;
+    let modified = false;
 
-    // Create account
-    const accountRes = await axios.post('https://api.mail.tm/accounts', {
-      address,
-      password
-    });
+    try {
+      // Try to create custom email
+      const accountRes = await axios.post('https://api.mail.tm/accounts', {
+        address,
+        password
+      });
 
-    // Authenticate
-    const tokenRes = await axios.post('https://api.mail.tm/token', {
-      address,
-      password
-    });
+      const tokenRes = await axios.post('https://api.mail.tm/token', {
+        address,
+        password
+      });
 
-    return res.json({
-      id: accountRes.data.id,
-      address,
-      token: tokenRes.data.token
-    });
+      return res.json({
+        id: accountRes.data.id,
+        address,
+        token: tokenRes.data.token
+      });
+    } catch (err) {
+      if (err.response?.status !== 422) throw err;
+
+      // Email already taken – append random suffix
+      const suffix = Math.random().toString(36).substring(2, 8);
+      const modifiedAddress = `${base}-${suffix}@${domain}`;
+      modified = true;
+
+      // Retry with modified address
+      const accountRes = await axios.post('https://api.mail.tm/accounts', {
+        address: modifiedAddress,
+        password
+      });
+
+      const tokenRes = await axios.post('https://api.mail.tm/token', {
+        address: modifiedAddress,
+        password
+      });
+
+      return res.json({
+        id: accountRes.data.id,
+        address: modifiedAddress,
+        token: tokenRes.data.token,
+        modified: true,
+        original: address
+      });
+    }
   } catch (err) {
     console.error('[generate] error:', err.response?.data || err.message);
-    if (err.response?.status === 422) {
-      return res.status(400).json({ error: 'Email already taken. Try another name.' });
-    }
     return res.status(500).json({ error: 'Failed to create email address.' });
   }
 });
